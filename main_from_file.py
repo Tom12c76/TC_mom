@@ -125,6 +125,8 @@ def plot_all():
 
     fig_all.update_xaxes(zerolinecolor='white', zerolinewidth=3)
     fig_all.update_yaxes(zerolinecolor='white', zerolinewidth=3)
+    fig_all.update_xaxes(title_text="Velocity", row=1, col=1)
+    fig_all.update_yaxes(title_text="Acceleration", row=1, col=1)
 
     return fig_all
 
@@ -199,6 +201,7 @@ def plot_one():
     fig_one.update_xaxes(zerolinecolor='white', zerolinewidth=3)
     fig_one.update_yaxes(zerolinecolor='white', zerolinewidth=3)
     fig_one.update_yaxes(range=[-5,5], row=2, col=1)
+    fig_one.update_yaxes(title_text="Velocity", row=2, col=1)
 
     return fig_one
 
