@@ -5,3 +5,4 @@ plotly>=4.14.3
 numpy>=1.16.5
 datetime>=4.3
 scipy>=1.7.1
+streamlit-plotly-events==0.0.6
