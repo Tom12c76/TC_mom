@@ -10,7 +10,6 @@ from scipy.stats import norm
 
 st.set_page_config(page_title="TC's Momentum Viz", layout="wide")
 st.sidebar.header("TC's Momentum Viz :sunglasses:")
-st.sidebar.write("Analysing the DJIA constituents")
 
 snsgreen, snsorange, snsred, snsblue, snsgrey = ['#55a868', '#dd8452', '#c44e52', '#4c72b0', '#8c8c8c']
 
@@ -21,6 +20,7 @@ width = [1.5, 0.9, 0.9, 1.5]
 
 @st.cache
 def get_hist():
+    tickers = df_groups[df_groups['groups'] == sel_group]['yf_ticker']
     px_hist = yf.download(
         tickers=tickers.to_list(),
         period="2y",
@@ -28,8 +28,7 @@ def get_hist():
         group_by='column',
         auto_adjust=True)
 
-    px_hist = px_hist['Close'].dropna()
-
+    px_hist = px_hist['Close'].fillna(method='ffill')
     logret = np.log(px_hist / px_hist.shift(1))
     logret.iloc[0] = 0
     cumret = np.exp(logret.cumsum()) - 1
@@ -76,7 +75,7 @@ def get_quad():
     quad = pd.DataFrame(data={'Pos Spl': [True, True, False, False],
                               'Pos Deriv': [True, False, True, False],
                               'Quadrant': ['Leading', 'Weakening', 'Improving', 'Lagging'],
-                              'Trade': ['Buy Call','Short Call','Short Put','Long Put'],
+                              'Trade': ['Long Call','Short Call','Short Put','Long Put'],
                               'Color': [snsgreen, snsorange, snsblue, snsred]})
 
     xclass = pd.concat([spline.tail(1).transpose() >= 0, derivative.tail(1).transpose() >= 0], axis=1)
@@ -89,7 +88,7 @@ def plot_all():
 
     fig_all = make_subplots(rows=1, cols=1,
                             shared_xaxes=True, shared_yaxes=False, vertical_spacing=0.05, horizontal_spacing=0.02,
-                            subplot_titles=(f'<b>TC Momentum  ({win} days)','pippo'))
+                            subplot_titles=('<b>TC Momentum',''))
 
     for column in spline:
         fig_all.add_trace(go.Scatter(x=spline[column].tail(tail),
@@ -119,21 +118,19 @@ def plot_all():
         fig_all.add_vline(x=l, line_color=c, opacity=o, line_width=w, line_dash="dash", row=1, col=1)
 
     fig_all.update_layout(showlegend=False, margin=dict(l=0, r=10, t=50, b=30), plot_bgcolor='#f0f2f6',
-                          width=500, height=700)  #paper_bgcolor='lightyellow'
+                          width=500, height=650)  #paper_bgcolor='lightyellow'
 
     fig_all.update_xaxes(zerolinecolor='white', zerolinewidth=3)
     fig_all.update_yaxes(zerolinecolor='white', zerolinewidth=3)
-    fig_all.update_xaxes(title_text="Velocity", row=1, col=1)
-    fig_all.update_yaxes(title_text="Acceleration", row=1, col=1)
 
     return fig_all
 
 
 def plot_one():
 
-    fig_one = make_subplots(rows=2, cols=1, row_heights=[2, 1],
+    fig_one = make_subplots(rows=2, cols=1, row_heights=[3, 2],
                             shared_xaxes=True, shared_yaxes=False, vertical_spacing=0.05, horizontal_spacing=0.02,
-                            subplot_titles=(f'<b>{tkr} close prices', f'<b>Rolling Sharpe Ratio & TC Momentum ({win} days)'))
+                            subplot_titles=(f'<b>Close prices for {names.loc[tkr]["name"]}', f'<b>Rolling Sharpe Ratio & TC Momentum ({win} days)'))
 
     fig_one.add_trace(go.Scatter(x=px_hist.index, y=px_hist[tkr],
                                  mode='lines', line=dict(color=snsblue, width=3),
@@ -194,22 +191,25 @@ def plot_one():
         fig_one.add_hline(y=l, line_color=c, opacity=o, line_width=w, line_dash="dash", row=2, col=1)
 
     fig_one.update_layout(showlegend=False, margin=dict(l=0, r=10, t=50, b=30), plot_bgcolor='#f0f2f6',
-                          width=900, height=700)    # paper_bgcolor = 'lightyellow'
+                          width=880, height=650)    # paper_bgcolor = 'lightyellow'
 
     fig_one.update_xaxes(zerolinecolor='white', zerolinewidth=3)
     fig_one.update_yaxes(zerolinecolor='white', zerolinewidth=3)
     fig_one.update_yaxes(range=[-5,5], row=2, col=1)
-    fig_one.update_yaxes(title_text="Velocity", row=2, col=1)
 
     return fig_one
 
 
 # BODY
 
-df = pd.read_csv('CSINDU.csv')
-tickers = df['Issuer Ticker']
+df_groups = pd.read_csv('yf_groups.csv')
+sel_group = st.sidebar.selectbox('Choose group',df_groups.groups.unique())
+names = df_groups[df_groups['groups']==sel_group][['yf_ticker','name']]
+names = names.set_index('yf_ticker')
+# st.write(names)
 
-param_expander = st.sidebar.expander(label='Set your parameters')
+
+param_expander = st.sidebar.expander(label='Customize TC Mom. parameters')
 with param_expander:
     win = st.select_slider('Calculation win', options=[10, 21, 63, 126], value=63)
     avg_win = st.slider('Averaging win', min_value=1, max_value=63, value=5)
@@ -221,27 +221,21 @@ rol_ret, rol_vol, rol_rar, rol_rar_avg = get_rol()
 spline, derivative, arrow = get_spline()
 quad = get_quad()
 
-col1, col2 = st.columns([3, 5])
-
-with col1:
-    fig_all = plot_all()
-    try:
-        pippo = plotly_events(fig_all, override_height=800)[0]['curveNumber']
-        # st.write(pippo)
-        tkr = fig_all['data'][pippo]['name']
-        # st.write(tkr)
-    except:
-        tkr = spline.columns[-1]
-        # st.write('error')
-
-with col2:
-    fig_one = plot_one()
-    st.plotly_chart(fig_one)
-
 rec = pd.concat([quad[['Trade','Color']], arrow.iloc[-1] - spline.iloc[-1]], axis=1)
 rec.columns = ['Trade','Color','Improvement']
 rec['Score'] = abs(rec['Improvement'])
 rec = rec.sort_values('Score', ascending=False)
+rec_dict = rec.to_dict()
+tkr = st.selectbox('Recommendations:', options=rec.index,
+                           format_func=lambda x: f"{x} - {rec_dict['Trade'][x]} on {names.loc[x]['name']} (Score={rec_dict['Score'][x]:.1f})")
 
-st.subheader("TC's Momentum recommendations")
-st.dataframe(rec[['Trade','Score']])
+
+
+col1, col2 = st.columns([3, 5])
+with col1:
+    fig_all = plot_all()
+    st.plotly_chart(fig_all)
+
+with col2:
+    fig_one = plot_one()
+    st.plotly_chart(fig_one)
