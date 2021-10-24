@@ -224,13 +224,24 @@ rol_ret, rol_vol, rol_rar, rol_rar_avg = get_rol()
 spline, derivative, arrow = get_spline()
 quad = get_quad()
 
+
+
+
 rec = pd.concat([quad[['Trade','Color']], arrow.iloc[-1] - spline.iloc[-1]], axis=1)
 rec.columns = ['Trade','Color','Improvement']
 rec['Score'] = abs(rec['Improvement'])
 rec = rec.sort_values('Score', ascending=False)
+
+m, n = st.sidebar.slider("Filter # of securities", 1, len(rec), (1, len(rec)), 5)
+f_tickers = rec.iloc[m-1:n-1].index.tolist()
+# st.write(f_tickers)
+spline = spline[f_tickers]
+derivative = derivative[f_tickers]
+arrow = arrow[f_tickers]
+
 rec_dict = rec.to_dict()
-tkr = st.selectbox('Recommendations:', options=rec.index,
-                           format_func=lambda x: f"{x} - {rec_dict['Trade'][x]} on {names.loc[x]['name']} (Score={rec_dict['Score'][x]:.1f})")
+tkr = st.selectbox('Recommendations:', options=f_tickers,
+                   format_func=lambda x: f"{x} - {rec_dict['Trade'][x]} on {names.loc[x]['name']} (Score={rec_dict['Score'][x]:.1f})")
 
 
 
