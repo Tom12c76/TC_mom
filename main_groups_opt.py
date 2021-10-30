@@ -8,11 +8,14 @@ from plotly.subplots import make_subplots
 from scipy.interpolate import UnivariateSpline
 import datetime
 from scipy.stats import norm
+from scipy.optimize import minimize
 
 st.set_page_config(page_title="TC's Momentum Viz", layout="wide")
 st.sidebar.header("TC's Momentum Viz :sunglasses:")
 
 snsgreen, snsorange, snsred, snsblue, snsgrey = ['#55a868', '#dd8452', '#c44e52', '#4c72b0', '#8c8c8c']
+
+riskfree = 0.005
 
 level = [-0.86, -0.25, 0.25, 0.86]
 color = [snsred, snsred, snsgreen, snsgreen]
@@ -212,6 +215,9 @@ def get_exp_dates(tkr):
     filt_dates = lambda x: (D2Emin < ((x - datetime.datetime.now()).days) < D2Emax) \
                            and (min_day <= x.day <= max_day)
     exp_dates = list(map(lambda x: str(x.date()), filter(filt_dates, pd.to_datetime(yf.Ticker(tkr).options))))
+    if len(exp_dates) == 0:
+        st.error(f'Holy :poop: no options available for ticker **{tkr}** on Yahoo!')
+        st.stop()
     return exp_dates
 
 
@@ -242,17 +248,19 @@ def calc_opt_hist(strategy, strike):
     opt_hist = stock_hist.copy()
     opt_hist['cd2e'] = (exp_date - stock_hist.index.date)
     opt_hist['cd2e'] = opt_hist['cd2e'].dt.days
-    opt_hist['bs'] = opt_hist.apply(lambda row: BlackSholes(strategy, row[0], strike, row.cd2e / 365, riskfree, solver_vol), axis=1)
+    opt_hist['bs'] = opt_hist.apply(lambda row: BlackSholes(strategy, row[tkr], strike, row.cd2e / 365, riskfree, solver_vol), axis=1)
     return opt_hist, solver_vol
 
 
 def get_fig():
     fig = go.Figure()
 
+    global rol_vol
+
     col_title_2 = f'<b>Current P&L = {pnl_last:,.0f}'
-    fig = make_subplots(rows=2, cols=3, shared_xaxes=True, shared_yaxes=True,
+    fig = make_subplots(rows=1, cols=3, shared_xaxes=True, shared_yaxes=True,
                         vertical_spacing=0.05, horizontal_spacing=0.01,
-                        row_heights=[2, 1], column_widths=[8, 2, 0.5],
+                        row_heights=[1], column_widths=[8, 2, 0.5],
                         column_titles=[col_title_1, col_title_2, '<b>Prob'],
                         subplot_titles = ('', '', '', '<b>Rol Ret / Rol Vol / Backtest'))
 
@@ -272,6 +280,11 @@ def get_fig():
                              y=opt_hist[opt_hist['cd2e'] <= (cd2e + 20)]['breakeven'],
                              name='BS approx', connectgaps=True, mode='lines', line={'color': snsorange, 'width': 2.5},
                              opacity=0.4),
+                  row=1, col=1)
+
+    fig.add_trace(go.Scatter(x=arrow.index, y=px_hist[tkr].shift(win).iloc[-1] * (1 + arrow[tkr] * rol_vol[tkr].iloc[-1]),
+                                 mode='lines',  line=dict(color=quad['Color'][tkr], width=5), opacity=0.5,
+                                 name='Close Price'),
                   row=1, col=1)
 
     fig.add_trace(go.Scatter(x=bell, y=range, name='norm dist', mode='lines',
@@ -307,11 +320,11 @@ def get_fig():
                                  showlegend=False, opacity=o, line={'color': color, 'width': width, 'dash': 'dashdot'}),
                       row=1, col=2)
 
-        fig.add_trace(go.Scatter(x=[stock_hist.index.min(), exp_date],
-                                 y=[l / stock_hist[ticker].iloc[-1] - 1, l / stock_hist[ticker].iloc[-1] - 1],
-                                 showlegend=False, mode='lines', opacity=o,
-                                 line={'color': color, 'width': width, 'dash': 'dashdot'}),
-                      row=2, col=1)
+        # fig.add_trace(go.Scatter(x=[stock_hist.index.min(), exp_date],
+        #                          y=[l / stock_hist[ticker].iloc[-1] - 1, l / stock_hist[ticker].iloc[-1] - 1],
+        #                          showlegend=False, mode='lines', opacity=o,
+        #                          line={'color': color, 'width': width, 'dash': 'dashdot'}),
+        #               row=2, col=1)
 
         fig.add_trace(go.Scatter(x=[0, max(bell)*1.25], y=[l, l],
                                  text=['', f'<b>p{1 - norm.cdf((abs(l / ref_price_tx_date - 1)) / (solver_vol * np.sqrt(td2e / 252))):.0%}'],
@@ -351,33 +364,34 @@ def get_fig():
                                  line={'color': snsorange, 'width': 2.5}, opacity=0.4),
                       row=1, col=1)
 
-    rol_ret = stock_hist[ticker] / stock_hist[ticker].shift(td2e) - 1
-    fig.add_trace(
-        go.Scatter(x=rol_ret.index, y=rol_ret,
-                   name=str(td2e) + ' td Rol Ret', connectgaps=True, line={'color': snsgrey, 'width': 1},
-                   fill='tozeroy'),
-        row=2, col=1)
+    # rol_ret = stock_hist[ticker] / stock_hist[ticker].shift(td2e) - 1
+    # fig.add_trace(
+    #     go.Scatter(x=rol_ret.index, y=rol_ret,
+    #                name=str(td2e) + ' td Rol Ret', connectgaps=True, line={'color': snsgrey, 'width': 1},
+    #                fill='tozeroy'),
+    #     row=2, col=1)
+    #
+    # rol_vol = np.log(stock_hist[ticker]/stock_hist[ticker].shift(1)).rolling(td2e).std()*np.sqrt(td2e)
+    # fig.add_trace(go.Scatter(x=rol_vol.index, y=rol_vol,
+    #                          name=str(td2e) + ' td Rol Vol', connectgaps=True, line={'color': snsorange, 'width': 1.25}),
+    #               row=2, col=1)
+    #
+    # fig.add_trace(go.Scatter(x=rol_vol.index, y=-rol_vol,
+    #                          name='', connectgaps=True, showlegend=False,
+    #                          line={'color': snsorange, 'width': 1.25}),
+    #               row=2, col=1)
+    #
+    # fig.add_trace(go.Scatter(x=[tx_date,tx_date], y=[solver_vol*np.sqrt(td2e/252), -solver_vol*np.sqrt(td2e/252)],
+    #                          name='ivol solver', mode='markers',
+    #                          line={'color': snsorange, 'width': 1.25}),
+    #               row=2, col=1)
 
-    rol_vol = np.log(stock_hist[ticker]/stock_hist[ticker].shift(1)).rolling(td2e).std()*np.sqrt(td2e)
-    fig.add_trace(go.Scatter(x=rol_vol.index, y=rol_vol,
-                             name=str(td2e) + ' td Rol Vol', connectgaps=True, line={'color': snsorange, 'width': 1.25}),
-                  row=2, col=1)
 
-    fig.add_trace(go.Scatter(x=rol_vol.index, y=-rol_vol,
-                             name='', connectgaps=True, showlegend=False,
-                             line={'color': snsorange, 'width': 1.25}),
-                  row=2, col=1)
-
-    fig.add_trace(go.Scatter(x=[tx_date,tx_date], y=[solver_vol*np.sqrt(td2e/252), -solver_vol*np.sqrt(td2e/252)],
-                             name='ivol solver', mode='markers',
-                             line={'color': snsorange, 'width': 1.25}),
-                  row=2, col=1)
-
-
-    fig.update_xaxes(zerolinecolor='grey', zerolinewidth=1.25, col=2, row=1)
+    fig.update_xaxes(zerolinecolor='grey', zerolinewidth=1.25, showticklabels=False, col=2, row=1)
+    fig.update_xaxes(showticklabels=False, col=3, row=1)
     fig.update_yaxes(zerolinecolor='grey', zerolinewidth=1.25, tickformat='%', col=1, row=2)
     fig.update_layout(margin=dict(l=0, r=0, t=50, b=0), template='seaborn', plot_bgcolor='#F0F2F6')
-    fig.update_layout(height=700, width=1200)  #, paper_bgcolor='yellow')
+    fig.update_layout(height=620, width=1200)  #, paper_bgcolor='yellow')
     fig.update_layout(legend=dict(yanchor="top", y=0.99, xanchor="left", x=0.01))
 
     return fig
@@ -392,12 +406,16 @@ names = names.set_index('yf_ticker')
 # st.write(names)
 
 
-param_expander = st.sidebar.expander(label='Customize TC Mom. parameters')
-with param_expander:
-    win = st.select_slider('Calculation win', options=[10, 21, 63, 126], value=63)
-    avg_win = st.slider('Averaging win', min_value=1, max_value=63, value=5)
-    s_factor = st.slider('Smoothing factor', 0.0, 0.2, 0.05)
-    tail = st.slider('Tail length', 0, 21, 10)
+# param_expander = st.sidebar.expander(label='Customize TC Mom. parameters')
+# with param_expander:
+#     win = st.select_slider('Calculation win', options=[10, 21, 63, 126], value=63)
+#     avg_win = st.slider('Averaging win', min_value=1, max_value=63, value=5)
+#     s_factor = st.slider('Smoothing factor', 0.0, 0.2, 0.05)
+#     tail = st.slider('Tail length', 0, 21, 10)
+win = 63
+avg_win = 5
+s_factor = 0.05
+tail = 10
 
 px_hist, cumret, logret = get_hist()
 rol_ret, rol_vol, rol_rar, rol_rar_avg = get_rol()
@@ -412,45 +430,286 @@ rec.columns = ['Trade','Color','Improvement']
 rec['Score'] = abs(rec['Improvement'])
 rec = rec.sort_values('Score', ascending=False)
 
-m, n = st.sidebar.slider("Filter # of securities", 1, len(rec), (1, len(rec)), 5)
-f_tickers = rec.iloc[m-1:n-1].index.tolist()
-spline = spline[f_tickers]
-derivative = derivative[f_tickers]
-arrow = arrow[f_tickers]
-
-rec_dict = rec.to_dict()
-tkr = st.selectbox('Recommendations:', options=f_tickers,
-                   format_func=lambda x: f"{x} - {rec_dict['Trade'][x]} on {names.loc[x]['name']} (Score={rec_dict['Score'][x]:.1f})")
-
-
-opt = st.sidebar.checkbox('Options?', False)
-if not opt:
-    col1, col2 = st.columns([3, 5])
+with st.container():
+    col1, col2, col3 = st.columns((5, 3, 2))
+    with col2:
+        m, n = st.slider("Keep top # of securities", 1, len(rec), (1, min(len(rec),31)), 5)
+        f_tickers = rec.iloc[m-1:n-1].index.tolist()
+        spline = spline[f_tickers]
+        derivative = derivative[f_tickers]
+        arrow = arrow[f_tickers]
     with col1:
+        rec_dict = rec.to_dict()
+        tkr = st.selectbox('Recommendations:', options=f_tickers,
+                           format_func=lambda x: f"{x} - {rec_dict['Trade'][x]} on {names.loc[x]['name']} (Score={rec_dict['Score'][x]:.1f})")
+    with col3:
+        st.write('')
+        st.write('')
+        opt = st.checkbox('Switch to Options Viz?', False)
+
+if not opt:
+    col11, col12 = st.columns([3, 5])
+    with col11:
         fig_all = plot_all()
         st.plotly_chart(fig_all)
 
-    with col2:
+    with col12:
         fig_one = plot_one()
         st.plotly_chart(fig_one)
 else:
-    st.header('welcome to options')
-
     ticker = tkr
-    stock_hist = px_hist
-    st.write(stock_hist)
+    stock_hist = px_hist[[tkr]]
+    rol_vol = rol_vol[[tkr]]
     ref_date = stock_hist.index.max().date()
     ref_price = stock_hist.iloc[-1][0]
-    st.write(ref_date, ref_price)
 
     exp_dates = get_exp_dates(tkr)
     exp_date = st.sidebar.selectbox('Pick exp date', exp_dates, index=len(exp_dates)-1)
     exp_date = datetime.datetime.strptime(exp_date, '%Y-%m-%d').date()
+
     call_chain, put_chain = get_chains(tkr)
     hide_itm = st.sidebar.checkbox('Hide ITM strikes', value=True)
     if hide_itm:
         call_chain = call_chain[call_chain['inTheMoney'] == False]
         put_chain = put_chain[put_chain['inTheMoney'] == False]
-    st.write(call_chain, put_chain)
-    st.write(BlackSholes("Call", 100, 100, 1, 0.05, 0.2))
+
+    if rec_dict['Trade'][tkr].split()[1] == 'Call':
+        call_strikes_dflt = call_chain['strike'].iloc[0]
+    else:
+        call_strikes_dflt = []
+    call_strikes = st.sidebar.multiselect('Call strikes (max 2)', call_chain['strike'],
+                                          call_strikes_dflt)
+    call_strikes = sorted(call_strikes)
+    # format_func = lambda x: f'{x} ({x / ref_price:.0%})'
+    if rec_dict['Trade'][tkr].split()[1] == 'Put':
+        put_strikes_dflt = put_chain[::-1]['strike'].iloc[0]
+    else:
+        put_strikes_dflt = []
+    put_strikes = st.sidebar.multiselect('Put strikes (max 2)', put_chain[::-1]['strike'],
+                                         put_strikes_dflt)
+    put_strikes = sorted(put_strikes, reverse=True)
+
+    if rec_dict['Trade'][tkr].split()[0] == "Long":
+        long_short_index = 0
+    else:
+        long_short_index = 1
+    long_short = st.sidebar.radio('Long or Short', ('Long', 'Short'), index=long_short_index)
+    if long_short == 'Long':
+        ls = 1
+    else:
+        ls = -1
+
+    lots = st.sidebar.select_slider('N of lots', [1, 5, 10, 20, 50, 100], 10) * ls
+    mult = 100
+
+    tx_date = ref_date
+    # tx_date = st.sidebar.date_input('Transaction date override', ref_date)
+    # if tx_date > ref_date:
+    #     tx_date = ref_date
+
+    cd2e = (exp_date - tx_date).days
+    td2e = cd2e // 7 * 5 + cd2e % 7
+
+    if len(call_strikes) == 1 and len(put_strikes) == 0:
+        strategy = 'Call'
+        lastPrice, impliedVolatility, pcf = \
+            call_chain[call_chain['strike'] == call_strikes[0]][
+                ['lastPrice', 'impliedVolatility', 'pcf']].values.tolist()[0]
+        opt_hist, solver_vol = calc_opt_hist(strategy='Call', strike=call_strikes[0])
+        opt_hist['breakeven'] = call_strikes[0] + opt_hist['bs']
+        i = opt_hist.index.get_loc(pd.to_datetime(tx_date), method='nearest')
+        tx_price = round(opt_hist.iloc[i]['bs'], 2)
+        # tx_price_suggest = round(opt_hist.iloc[i]['bs'], 2)
+        # tx_price = st.sidebar.number_input('Transaction  price override', min_value=0.01, max_value=None,
+        #                                    value=max(tx_price_suggest, 0.01))
+        levels = call_strikes[0] + np.multiply([-4, 0, 1, 2, 3, 4], tx_price)
+        levels_short = levels[1:]
+        level_tx = call_strikes[0] + tx_price
+        level_last = call_strikes[0] + lastPrice
+        pnl = np.multiply([-1, -1, 0, 1, 2, 3], tx_price) * lots * mult
+        pnl_short = pnl[1:]
+        pnl_last = (lastPrice - tx_price) * lots * mult
+        col_title_1 = f'<b>{long_short} {lots} lots of the {exp_date:%d-%b-%y}<br>{ticker}  {call_strikes[0]}  strike  {strategy}s  @  {tx_price:.2f}  [now {lastPrice:.2f}]'
+        pos_strikes = {'call_0': call_strikes[0], 'call_1': np.NaN, 'put_0': np.NaN, 'put_1': np.NaN}
+    elif len(call_strikes) == 2 and len(put_strikes) == 0:
+        strategy = 'Call'
+        # lower strike
+        lastPrice, impliedVolatility, pcf = \
+        call_chain[call_chain['strike'] == call_strikes[0]][['lastPrice', 'impliedVolatility', 'pcf']].values.tolist()[
+            0]
+        opt_hist_lower, solver_vol = calc_opt_hist(strategy='Call', strike=call_strikes[0])
+
+        # higher strike
+        lastPrice, impliedVolatility, pcf = \
+        call_chain[call_chain['strike'] == call_strikes[1]][['lastPrice', 'impliedVolatility', 'pcf']].values.tolist()[
+            0]
+        opt_hist_higher, solver_vol = calc_opt_hist(strategy='Call', strike=call_strikes[1])
+
+        # combine
+        opt_hist = opt_hist_lower
+        opt_hist['bs'] = opt_hist['bs'] - opt_hist_higher['bs']
+        opt_hist['breakeven'] = call_strikes[0] + opt_hist['bs']
+
+        i = opt_hist.index.get_loc(pd.to_datetime(tx_date), method='nearest')
+        tx_price = round(opt_hist.iloc[i]['bs'], 2)
+        # tx_price_suggest = round(opt_hist.iloc[i]['bs'], 2)
+        # tx_price = st.sidebar.number_input('Transaction  price override', min_value=0.01, max_value=None,
+        #                                    value=max(tx_price_suggest, 0.01))
+
+        strategy = 'Call Spread'
+        spread = call_strikes[1] - call_strikes[0]
+        lastPrice = call_chain[call_chain['strike'] == call_strikes[0]]['lastPrice'].item() - \
+                    call_chain[call_chain['strike'] == call_strikes[1]]['lastPrice'].item()
+
+        levels = [call_strikes[0] - spread, call_strikes[0], call_strikes[0] + tx_price, call_strikes[1],
+                  call_strikes[1] + spread]
+        levels_short = levels[1:4]
+        level_tx = call_strikes[0] + tx_price
+        level_last = call_strikes[0] + lastPrice
+        pnl = np.multiply([-tx_price, -tx_price, 0, spread - tx_price, spread - tx_price], lots * mult)
+        pnl_short = pnl[1:4]
+        pnl_last = (lastPrice - tx_price) * lots * mult
+        col_title_1 = f'<b>{long_short} {lots} lots of the {exp_date:%d-%b-%y}<br>{ticker}  {call_strikes[0]}/{call_strikes[1]}  strike  {strategy}  @  {tx_price:.2f}  [now {lastPrice:.2f}]'
+        pos_strikes = {'call_0': call_strikes[0], 'call_1': call_strikes[1], 'put_0': np.NaN, 'put_1': np.NaN}
+    elif len(call_strikes) == 0 and len(put_strikes) == 1:
+        strategy = 'Put'
+        lastPrice, impliedVolatility, pcf = \
+        put_chain[put_chain['strike'] == put_strikes[0]][['lastPrice', 'impliedVolatility', 'pcf']].values.tolist()[0]
+
+        opt_hist, solver_vol = calc_opt_hist(strategy='Put', strike=put_strikes[0])
+        opt_hist['breakeven'] = put_strikes[0] - opt_hist['bs']
+        i = opt_hist.index.get_loc(pd.to_datetime(tx_date), method='nearest')
+        tx_price = round(opt_hist.iloc[i]['bs'], 2)
+        # tx_price_suggest = round(opt_hist.iloc[i]['bs'], 2)
+        # tx_price = st.sidebar.number_input('Transaction  price override', min_value=0.01, max_value=None,
+        #                                    value=max(tx_price_suggest, 0.01))
+        levels = put_strikes[0] - np.multiply([-4, 0, 1, 2, 3, 4], tx_price)
+        pnl = np.multiply([-1, -1, 0, 1, 2, 3], tx_price) * lots * mult
+        levels_short = levels[1:]
+        level_tx = put_strikes[0] - tx_price
+        level_last = put_strikes[0] - lastPrice
+        pnl_short = pnl[1:]
+        pnl_last = (lastPrice - tx_price) * lots * mult
+        col_title_1 = f'<b>{long_short} {lots} lots of the {exp_date:%d-%b-%y}<br>{ticker}  {put_strikes[0]}  strike  {strategy}s  @  {tx_price:.2f}  [now {lastPrice:.2f}]'
+        pos_strikes = {'call_0': np.NaN, 'call_1': np.NaN, 'put_0': put_strikes[0], 'put_1': np.NaN}
+    elif len(call_strikes) == 0 and len(put_strikes) == 2:
+        strategy = 'Put'
+        # higher strike
+        lastPrice, impliedVolatility, pcf = \
+            put_chain[put_chain['strike'] == put_strikes[0]][['lastPrice', 'impliedVolatility', 'pcf']].values.tolist()[
+                0]
+        opt_hist_higher, solver_vol = calc_opt_hist(strategy='Put', strike=put_strikes[0])
+        # lower strike
+        lastPrice, impliedVolatility, pcf = \
+            put_chain[put_chain['strike'] == put_strikes[1]][['lastPrice', 'impliedVolatility', 'pcf']].values.tolist()[
+                0]
+        opt_hist_lower, solver_vol = calc_opt_hist(strategy='Put', strike=put_strikes[1])
+        # combine
+        opt_hist = opt_hist_higher
+        opt_hist['bs'] = opt_hist['bs'] - opt_hist_lower['bs']
+        opt_hist['breakeven'] = put_strikes[0] - opt_hist['bs']
+        i = opt_hist.index.get_loc(pd.to_datetime(tx_date), method='nearest')
+        tx_price = round(opt_hist.iloc[i]['bs'], 2)
+        # tx_price_suggest = round(opt_hist.iloc[i]['bs'], 2)
+        # tx_price = st.sidebar.number_input('Transaction  price override', min_value=0.01, max_value=None,
+        #                                    value=max(tx_price_suggest, 0.01))
+        strategy = 'Put Spread'
+        spread = put_strikes[0] - put_strikes[1]
+        lastPrice = put_chain[put_chain['strike'] == put_strikes[0]]['lastPrice'].item() - \
+                    put_chain[put_chain['strike'] == put_strikes[1]]['lastPrice'].item()
+        levels = [put_strikes[0] + spread, put_strikes[0], put_strikes[0] - tx_price, put_strikes[1],
+                  put_strikes[1] - spread]
+        levels_short = levels[1:4]
+        level_tx = put_strikes[0] - tx_price
+        level_last = put_strikes[0] - lastPrice
+        pnl = np.multiply([-tx_price, -tx_price, 0, spread - tx_price, spread - tx_price], lots * mult)
+        pnl_short = pnl[1:4]
+        pnl_last = (lastPrice - tx_price) * lots * mult
+        col_title_1 = f'<b>{long_short} {lots} lots of the {exp_date:%d-%b-%y}<br>{ticker}  {put_strikes[0]}/{put_strikes[1]}  strike  {strategy}  @  {tx_price:.2f}  [now {lastPrice:.2f}]'
+        pos_strikes = {'call_0': np.NaN, 'call_1': np.NaN, 'put_0': put_strikes[0], 'put_1': put_strikes[1]}
+    elif len(call_strikes) == 1 and len(put_strikes) == 1:
+        # higher strike
+        strategy = 'Call'
+        lastPrice, impliedVolatility, pcf = \
+            call_chain[call_chain['strike'] == call_strikes[0]][
+                ['lastPrice', 'impliedVolatility', 'pcf']].values.tolist()[0]
+        opt_hist_higher, solver_vol = calc_opt_hist(strategy='Call', strike=call_strikes[0])
+        # lower strike
+        lastPrice, impliedVolatility, pcf = \
+            put_chain[put_chain['strike'] == put_strikes[0]][['lastPrice', 'impliedVolatility', 'pcf']].values.tolist()[
+                0]
+        opt_hist_lower, solver_vol = calc_opt_hist(strategy='Put', strike=put_strikes[0])
+        # combine
+        opt_hist = opt_hist_higher
+        opt_hist['bs'] = opt_hist['bs'] + opt_hist_lower['bs']
+        opt_hist['breakeven'] = call_strikes[0] + opt_hist['bs']
+        opt_hist['breakeven lower'] = put_strikes[0] - opt_hist['bs']
+        i = opt_hist.index.get_loc(pd.to_datetime(tx_date), method='nearest')
+        tx_price = round(opt_hist.iloc[i]['bs'], 2)
+        # tx_price_suggest = round(opt_hist.iloc[i]['bs'], 2)
+        # tx_price = st.sidebar.number_input('Transaction  price override', min_value=0.01, max_value=None,
+        #                                    value=max(tx_price_suggest, 0.01))
+        if call_strikes[0] == put_strikes[0]:
+            strategy = 'Straddle'
+        elif call_strikes[0] > put_strikes[0]:
+            strategy = 'Strangle'
+
+        lastPrice = call_chain[call_chain['strike'] == call_strikes[0]]['lastPrice'].item() + \
+                    put_chain[put_chain['strike'] == put_strikes[0]]['lastPrice'].item()
+        levels = [call_strikes[0] + 2 * tx_price,
+                  call_strikes[0] + tx_price,
+                  call_strikes[0],
+                  put_strikes[0],
+                  put_strikes[0] - tx_price,
+                  put_strikes[0] - 2 * tx_price]
+
+        level_tx = call_strikes[0] + tx_price
+        level_last = call_strikes[0] + lastPrice
+        levels_short = levels
+        pnl = np.multiply([tx_price, 0, -tx_price, -tx_price, 0, tx_price], lots * mult)
+        pnl_last = (lastPrice - tx_price) * lots * mult
+        pnl_short = pnl
+        if strategy == "Straddle":
+            col_title_1 = f'<b>{long_short} {lots} lots of the {exp_date:%d-%b-%y}<br>{ticker}  {call_strikes[0]}  strike  {strategy}s  @  {tx_price:.2f}  [now {lastPrice:.2f}]'
+        else:
+            col_title_1 = f'<b>{long_short} {lots} lots of the {exp_date:%d-%b-%y}<br>{ticker}  {put_strikes[0]}/{call_strikes[0]}  strike  {strategy}  @  {tx_price:.2f}  [now {lastPrice:.2f}]'
+        pos_strikes = {'call_0': call_strikes[0], 'call_1': np.NaN, 'put_0': put_strikes[0], 'put_1': np.NaN}
+    else:
+        st.error('Holy :poop: I can only handle calls, puts, vertical spreads and straddles for now :man-shrugging:')
+        st.stop()
+
+    range_from = min(min(stock_hist[ticker]), min(levels))
+    range_to = max(max(stock_hist[ticker]), max(levels))
+    range = np.linspace(range_from, range_to, num=100)
+    ref_price_tx_date = opt_hist.iloc[i][0]
+    bell = norm.pdf((range / ref_price_tx_date - 1) / (solver_vol * np.sqrt(cd2e / 365)))
+
+    col1, col2 = st.columns((8, 1))
+    with col1:
+        fig = get_fig()
+        st.plotly_chart(fig)
+
+    with col2:
+        st.metric(ticker + ' last', f'${ref_price:.2f}')
+        st.metric('option last', f'{lastPrice:.2f}')
+        # st.metric('ivol yfinance', f'{impliedVolatility:.0%}')
+        st.metric('ivol solver', f'{solver_vol:.0%}')
+        st.metric('P&L', f'${pnl_last:,.0f}')
+
+    st.write(f'Go to :runner: stock summary on [yahoo!] (https://finance.yahoo.com/quote/{ticker})')
+
+    pos_details = {'ticker': ticker, 'exp_date': exp_date.isoformat(), 'long_short': long_short, 'lots': lots,
+                   'strategy': strategy, 'tx_date': tx_date.isoformat(), 'tx_price': tx_price}
+    df_pos = pd.DataFrame(data={**pos_details, **pos_strikes}, index=[0])
+    df_pos_cols = ['ticker', 'exp_date', 'long_short', 'lots', 'strategy', 'call_0', 'call_1', 'put_0', 'put_1',
+                   'tx_date', 'tx_price']
+    df_pos = df_pos[df_pos_cols]
+    df_pos.to_clipboard(index=False, header=True)
+
+    st.write('')
+    st.write('')
+    st.write('Trade details have been copied to clipboard :clipboard:')
+    st.write(df_pos)
+
+
 
