@@ -265,7 +265,7 @@ def get_fig():
                         subplot_titles = ('', '', '', '<b>Rol Ret / Rol Vol / Backtest'))
 
     fig.add_trace(go.Scatter(x=stock_hist.index, y=stock_hist[ticker],
-                             name=ticker+' close price', connectgaps=True, line={'color': snsblue, 'width': 2.5}, opacity=0.8),
+                             name=ticker+' close price', connectgaps=True, line={'color': snsblue, 'width': 2.5}, opacity=1),
                   row=1, col=1)
 
     fig.add_trace(go.Scatter(x=[tx_date, ref_date], y=[ref_price_tx_date, ref_price], mode='markers',
@@ -334,7 +334,9 @@ def get_fig():
                       row=1, col=3)
 
     fig.add_trace(go.Scatter(x=pnl, y=levels, name='payoff diagram',
-                             line={'color': snsblue, 'width': 2}, opacity=0.7),
+                             line={'color': snsblue, 'width': 2},
+                             marker=dict(color='white', line=dict(color=snsblue, width=2), size=8),
+                             opacity=1),
                   row=1, col=2)
 
     padding = (max(pnl)-min(pnl))/5
@@ -448,14 +450,15 @@ with st.container():
         opt = st.checkbox('Switch to Options Viz?', False)
 
 if not opt:
-    col11, col12 = st.columns([3, 5])
+    col11, col12 = st.columns([5, 3])
     with col11:
+        fig_one = plot_one()
+        st.plotly_chart(fig_one)
+
+    with col12:
         fig_all = plot_all()
         st.plotly_chart(fig_all)
 
-    with col12:
-        fig_one = plot_one()
-        st.plotly_chart(fig_one)
 else:
     ticker = tkr
     stock_hist = px_hist[[tkr]]
