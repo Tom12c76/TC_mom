@@ -855,7 +855,7 @@ elif opt == 'Portfolio':
         st.write('')
         st.write('')
         rec_grid = rol_wgt_score.tail(1)
-        # st.dataframe(ptf.style.format(formatter={('rar', 'wtf'): "{:.2f}"}), height=575)
+        # st.dataframe(ptf[['ticker', 'last score', 'predict', 'action']].reset_index(), height=575)
         AgGrid(ptf[['ticker', 'last score', 'predict', 'action']].reset_index(), height=590)
 
 
