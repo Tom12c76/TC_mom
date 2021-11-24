@@ -414,6 +414,7 @@ def plot_scatter():
                           row=1, col=1)
 
     fig_scatter.add_trace(go.Bar(x=[tkr], y=cumret[tkr].tail(1), name='TR',
+                                 text=f'{cumret[tkr].tail(1).item():.1%}', textposition='auto',
                                  marker_color='#b7cbeb', marker_line_color=snsblue,
                                  marker_line_width=2, opacity=0.8),
                           row=1, col=2)
@@ -424,12 +425,13 @@ def plot_scatter():
                                          name=t, opacity=0.8),
                               row=1, col=3)
 
-    # marker=dict(color='LightSkyBlue', size=120,line=dict(color='MediumPurple',width=12),name='RRR')),
-    fig_scatter.add_trace(go.Scatter(x=[vol.loc[tkr]], y=cumret[tkr].tail(1), mode='markers',
+    fig_scatter.add_trace(go.Scatter(x=[vol.loc[tkr]], y=cumret[tkr].tail(1), mode='markers+text',
+                                     text=f'{cumret[tkr].tail(1).item()/vol.loc[tkr]:.1f}', textposition="top right",
                                      marker=dict(color='rgba(158,202,225,0)', size=10, line=dict(color=snsblue, width=2), opacity=0.8)),
                           row=1, col=3)
 
     fig_scatter.add_trace(go.Bar(x=[vol.loc[tkr]], y=['<b>Vol >'], orientation='h',
+                                 text=f'{vol.loc[tkr]:.1%}', textposition='auto',
                                  marker_color='#b7cbeb', marker_line_color=snsblue,
                                  marker_line_width=2, opacity=0.8),
                           row=2, col=3)
@@ -850,12 +852,20 @@ elif opt == 'Portfolio':
                                                'upgrade','dbl upgrade','contrarian','max contrarian']})
         ptf = ptf.reset_index().rename(columns={'index':'ticker'})
         ptf = pd.merge(ptf, df_actions, how="inner", on='updown')
+        ptf['min_wgt'] = 0.0
+        ptf['max_wgt'] = 0.10
+        ptf['theo_wgt'] = (ptf['predict'] - 1) * 0.025
+        ptf['new_wgt'] = ptf['theo_wgt'] / ptf['theo_wgt'].sum()
 
         st.write('')
         st.write('')
         st.write('')
         rec_grid = rol_wgt_score.tail(1)
         # st.dataframe(ptf[['ticker', 'last score', 'predict', 'action']].reset_index(), height=575)
-        AgGrid(ptf[['ticker', 'last score', 'predict', 'action']].reset_index(), height=590)
+        AgGrid(ptf[['ticker', 'last score', 'predict', 'action']], height=590)
 
-
+    # st.dataframe(ptf)
+    AgGrid(ptf[['ticker','predict','min_wgt','max_wgt','theo_wgt','new_wgt']])
+    st.write('')
+    st.write('Sum of theo_wgt: ', f'{ptf["theo_wgt"].sum():.1%}')
+    st.write('Sum of new_wgt: ', f'{ptf["new_wgt"].sum():.1%}')
