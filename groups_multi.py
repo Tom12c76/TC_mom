@@ -855,7 +855,7 @@ elif opt == 'Portfolio':
         ptf['min_wgt'] = 0.0
         ptf['max_wgt'] = 0.10
         ptf['theo_wgt'] = (ptf['predict'] - 1) * 0.025
-        ptf['new_wgt'] = ptf['theo_wgt'] / ptf['theo_wgt'].sum()
+        ptf['ptf_wgt'] = ptf['theo_wgt'] / ptf['theo_wgt'].sum()
 
         st.write('')
         st.write('')
@@ -865,7 +865,7 @@ elif opt == 'Portfolio':
         AgGrid(ptf[['ticker', 'last score', 'predict', 'action']], height=590)
 
     # st.dataframe(ptf)
-    AgGrid(ptf[['ticker','predict','min_wgt','max_wgt','theo_wgt','new_wgt']])
+    AgGrid(ptf[['ticker','predict','min_wgt','max_wgt','theo_wgt','ptf_wgt']])
     st.write('')
     st.write('Sum of theo_wgt: ', f'{ptf["theo_wgt"].sum():.1%}')
-    st.write('Sum of new_wgt: ', f'{ptf["new_wgt"].sum():.1%}')
+    st.write('Sum of ptf_wgt: ', f'{ptf["ptf_wgt"].sum():.1%}')
