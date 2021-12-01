@@ -9,7 +9,7 @@ from scipy.interpolate import UnivariateSpline
 import datetime
 from scipy.stats import norm
 from scipy.optimize import minimize
-from st_aggrid import AgGrid
+from st_aggrid import AgGrid, DataReturnMode, GridUpdateMode, GridOptionsBuilder, JsCode
 
 st.set_page_config(page_title="TC's Momentum Viz", layout="wide")
 st.sidebar.header("TC's Momentum Viz :sunglasses:")
@@ -138,7 +138,7 @@ def plot_one():
 
     fig_one = make_subplots(rows=2, cols=1, row_heights=[3, 2],
                             shared_xaxes=True, shared_yaxes=False, vertical_spacing=0.05, horizontal_spacing=0.02,
-                            subplot_titles=(f'<b>Close prices for {names.loc[tkr]["name"]}', f'<b>Rolling Sharpe Ratio & TC Momentum ({win} days)'))
+                            subplot_titles=(f'<b>Close prices for {names.loc[tkr]["name"]}', f'<b>Rolling TR/Vol Ratio & TC Momentum ({win} days)'))
 
     fig_one.add_trace(go.Scatter(x=px_hist.index, y=px_hist[tkr],
                                  mode='lines', line=dict(color=snsblue, width=3),
@@ -407,7 +407,7 @@ def plot_scatter():
     fig_scatter = make_subplots(rows=3, cols=3, row_heights=[10, 1, 7], column_widths=[11, 0.4, 5],
                             vertical_spacing=0.01, horizontal_spacing=0.005,
                             subplot_titles=(f'<b>Total return for {names.loc[tkr]["name"]}', '<b>TR',
-                                            f'<b>Risk/Return Ratio ({len(logret)} days)','','','',f'<b>Rolling Risk/Return Ratio ({win} days)'))
+                                            f'<b>TR/Vol Ratio ({len(logret)} days)','','','',f'<b>Rolling TR/Vol Ratio ({win} days)'))
 
     fig_scatter.add_trace(go.Scatter(x=cumret[tkr].index, y=cumret[tkr], mode='lines',
                                      line=dict(color=snsblue, width=3), name='Tot Ret', yaxis='y'),
@@ -456,7 +456,7 @@ def plot_scatter():
 
     fig_scatter.add_trace(go.Scatter(x=rol_rar.index, y=rol_rar[tkr],
                                     mode='lines', line=dict(color=snsgrey, width=2), opacity=0.8,
-                                    name=f'Rolling Sharpe Ratio {win} trading days', fill='tozeroy'),
+                                    name=f'Rolling TR/Vol Ratio {win} trading days', fill='tozeroy'),
                       row=3, col=1)
 
     fig_scatter.add_trace(go.Scatter(x=spline.index, y=spline[tkr],
@@ -550,7 +550,7 @@ with st.container():
         opt = st.selectbox('Switch to...', ['Scatter', 'Momentum', 'Options', 'Portfolio'], 0)
     with col2:
         m, n = st.slider("Keep top # of securities", 1, len(rec), (1, min(len(rec),31)), 5)
-        f_tickers = rec.iloc[m-1:n-1].index.tolist()
+        f_tickers = rec.iloc[m-1:n].index.tolist()
         spline = spline[f_tickers]
         derivative = derivative[f_tickers]
         arrow = arrow[f_tickers]
@@ -838,7 +838,6 @@ elif opt == 'Portfolio':
     with col22:
         pred = pd.DataFrame(norm.cdf(arrow.tail(1)), columns=arrow.columns, index=arrow.tail(1).index)
         pred = pd.cut(pred.unstack(), [0, 0.2, 0.4, 0.6, 0.8, 1], labels=False).unstack() + 1
-
         ptf = pd.concat([rol_rar.tail(1).T,
                          rol_wgt.tail(1).T,
                          rol_wgt_score.tail(1).T,
@@ -852,20 +851,47 @@ elif opt == 'Portfolio':
                                                'upgrade','dbl upgrade','contrarian','max contrarian']})
         ptf = ptf.reset_index().rename(columns={'index':'ticker'})
         ptf = pd.merge(ptf, df_actions, how="inner", on='updown')
-        ptf['min_wgt'] = 0.0
-        ptf['max_wgt'] = 0.10
-        ptf['theo_wgt'] = (ptf['predict'] - 1) * 0.025
-        ptf['ptf_wgt'] = ptf['theo_wgt'] / ptf['theo_wgt'].sum()
-
-        st.write('')
-        st.write('')
-        st.write('')
+        ptf = ptf.merge(df_groups[df_groups['groups'] == sel_group],
+                        left_on='ticker', right_on='yf_ticker')
         rec_grid = rol_wgt_score.tail(1)
-        # st.dataframe(ptf[['ticker', 'last score', 'predict', 'action']].reset_index(), height=575)
-        AgGrid(ptf[['ticker', 'last score', 'predict', 'action']], height=590)
+        js = JsCode("""
+        function(e) {
+            let api = e.api;
+            let rowIndex = e.rowIndex;
+            let col = e.column.colId;
+            let rowNode = api.getDisplayedRowAtIndex(rowIndex);
+            api.flashCells({
+              rowNodes: [rowNode],
+              columns: [col],
+              flashDelay: 10000000000
+            });
+        };
+        """)
+        gb = GridOptionsBuilder.from_dataframe(ptf[['ticker', 'last score', 'predict', 'action']])
+        gb.configure_columns(['predict'], editable=True)
+        gb.configure_grid_options(onCellValueChanged=js)
+        go = gb.build()
+        st.write('')
+        st.write('')
+        st.write('')
+        ag1_data = ptf[['ticker', 'last score', 'predict', 'action']]
+        ag1 = AgGrid(ag1_data, gridOptions=go, allow_unsafe_jscode=True, reload_data=False, height=590)
 
-    # st.dataframe(ptf)
-    AgGrid(ptf[['ticker','predict','min_wgt','max_wgt','theo_wgt','ptf_wgt']])
+
+    filters = [ptf.predict >= 3,
+               ptf.predict < 3]
+    values = [ptf.neut_wgt + (ptf.max_wgt - ptf.neut_wgt) * (ptf.predict - 3) / 2,
+              ptf.min_wgt + (ptf.neut_wgt - ptf.min_wgt) * (ptf.predict - 1) / 2]
+    ptf['theo_wgt'] = np.select(filters, values)
+    ptf['ptf_wgt'] = ptf['theo_wgt'] / ptf['theo_wgt'].sum() * 100
+
+    ptf[['min_wgt', 'neut_wgt', 'max_wgt', 'theo_wgt', 'ptf_wgt']] = ptf[
+        ['min_wgt', 'neut_wgt', 'max_wgt', 'theo_wgt', 'ptf_wgt']].round(decimals=2)
+
+    AgGrid(ptf[['ticker','predict','min_wgt', 'neut_wgt', 'max_wgt','theo_wgt','ptf_wgt']])
     st.write('')
-    st.write('Sum of theo_wgt: ', f'{ptf["theo_wgt"].sum():.1%}')
-    st.write('Sum of ptf_wgt: ', f'{ptf["ptf_wgt"].sum():.1%}')
+    st.write('Sum of theo_wgt: ', f'{ptf["theo_wgt"].sum():.1f}')
+    st.write('Sum of ptf_wgt: ', f'{ptf["ptf_wgt"].sum():.1f}')
+    st.write('Weighted Prediction: ', f'{(ptf["ptf_wgt"]*ptf["predict"]).sum()/100:.1f}')
+    st.write('Neutral Prediction: ', f'{(ptf["neut_wgt"] * ptf["predict"]).sum() / 100:.1f}')
+    st.write(ag1['data'])
